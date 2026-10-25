@@ -25,6 +25,18 @@ class ConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Create the options flow."""
         return OptionsFlowHandler(config_entry)
 
+    async def async_step_import(self, info):
+        """Load YAML chargers through config entries so entities have a device."""
+        # Match the existing name-based entity/device identity, including entries
+        # previously created in the UI. Repeated imports must not duplicate them.
+        for entry in self._async_current_entries():
+            if entry.data.get(CONF_NAME) == info[CONF_NAME]:
+                data = {**entry.data, **info}
+                if data != entry.data:
+                    self.hass.config_entries.async_update_entry(entry, data=data)
+                return self.async_abort(reason="already_configured")
+        return self.async_create_entry(title=info[CONF_NAME], data=info)
+
     async def async_step_user(self, info):
         if info is not None:
             _LOGGER.debug(info)

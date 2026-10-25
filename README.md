@@ -42,6 +42,11 @@ goecharger:
       correction_factor: factor for correction for total and session charged
 ```
 
+YAML chargers are automatically loaded through Home Assistant config entries so
+their sensors and switch appear on the charger device page. Keep the YAML
+configuration; changes are applied on restart. Existing charger names and entity
+IDs are preserved. Use a different name for each charger.
+
 # Sample View
 ![screenshot of Home Assistant](doc/ha_entity_view.png)
 

@@ -8,10 +8,10 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant.const import CONF_HOST, CONF_SCAN_INTERVAL, Platform
 from homeassistant.core import valid_entity_id
 from homeassistant import core
-from homeassistant.helpers.discovery import async_load_platform
+from homeassistant.config_entries import SOURCE_IMPORT
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .const import DOMAIN, CONF_SERIAL, CONF_CHARGERS, CONF_CORRECTION_FACTOR, CONF_NAME, CHARGER_API
+from .const import DOMAIN, CONF_SERIAL, CONF_CHARGERS, CONF_CORRECTION_FACTOR, CONF_NAME
 from goecharger import GoeCharger
 
 _LOGGER = logging.getLogger(__name__)
@@ -75,25 +75,18 @@ async def update_listener(hass, config):
     """Handle options update."""
     _LOGGER.debug("update_listener")
 
-    name = config.data[CONF_NAME]
-    charger = GoeCharger(config.data[CONF_HOST])
-    hass.data[DOMAIN]["api"][name] = charger
-
-    await hass.data[DOMAIN]["coordinator"].async_refresh()
-    await hass.config_entries.async_forward_entry_setups(config, [Platform.SENSOR, Platform.SWITCH])
-
-    hass.async_create_task(
-        hass.config_entries.async_forward_entry_setups(config, ["sensor"])
-    )
-    hass.async_create_task(
-        hass.config_entries.async_forward_entry_setups(config, ["switch"])
-    )
-    return True
+    await hass.config_entries.async_reload(config.entry_id)
 
 
 async def async_unload_entry(hass, entry):
-    _LOGGER.debug(f"Unloading charger '{entry.data[CONF_NAME]}")
-    hass.data[DOMAIN]["api"].pop(entry.data[CONF_NAME])
+    """Unload entities before removing their charger API."""
+    if not await hass.config_entries.async_unload_platforms(
+        entry, [Platform.SENSOR, Platform.SWITCH]
+    ):
+        return False
+    name = entry.data[CONF_NAME]
+    hass.data[DOMAIN]["api"].pop(name, None)
+    hass.data[DOMAIN]["coordinator"].data.pop(name, None)
     return True
 
 
@@ -140,18 +133,10 @@ async def async_setup(hass: core.HomeAssistant, config: dict) -> bool:
         if host:
             if not serial:
                 goeCharger = GoeCharger(host)
-                status = goeCharger.requestStatus()
+                status = await hass.async_add_executor_job(goeCharger.requestStatus)
                 serial = status["serial_number"]
             chargers.append([{CONF_NAME: serial, CONF_HOST: host, CONF_CORRECTION_FACTOR: correctionFactor}])
         _LOGGER.debug(repr(chargers))
-
-        for charger in chargers:
-            chargerName = charger[0][CONF_NAME]
-            host = charger[0][CONF_HOST]
-            _LOGGER.debug(f"charger: '{chargerName}' host: '{host}' ")
-
-            goeCharger = GoeCharger(host)
-            chargerApi[chargerName] = goeCharger
 
     hass.data[DOMAIN]["api"] = chargerApi
 
@@ -390,11 +375,13 @@ async def async_setup(hass: core.HomeAssistant, config: dict) -> bool:
     hass.services.async_register(DOMAIN, "set_cable_lock_mode", async_handle_set_cable_lock_mode)
     hass.services.async_register(DOMAIN, "set_charge_limit", async_handle_set_charge_limit)
 
-    hass.async_create_task(async_load_platform(
-        hass, "sensor", DOMAIN, {CONF_CHARGERS: chargers, CHARGER_API: chargerApi}, config)
-    )
-    hass.async_create_task(async_load_platform(
-        hass, "switch", DOMAIN, {CONF_CHARGERS: chargers, CHARGER_API: chargerApi}, config)
-    )
+    # Config entries are required for Home Assistant to link entities to devices.
+    # Keep YAML as the configuration source, but load entities only through entries.
+    for charger in chargers:
+        hass.async_create_task(hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": SOURCE_IMPORT},
+            data=dict(charger[0]),
+        ))
 
     return True
