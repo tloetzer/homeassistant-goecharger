@@ -82,6 +82,12 @@ async def update_listener(hass, config):
     await hass.data[DOMAIN]["coordinator"].async_refresh()
     await hass.config_entries.async_forward_entry_setups(config, [Platform.SENSOR, Platform.SWITCH])
 
+    hass.async_create_task(
+        hass.config_entries.async_forward_entry_setups(config, ["sensor"])
+    )
+    hass.async_create_task(
+        hass.config_entries.async_forward_entry_setups(config, ["switch"])
+    )
     return True
 
 
